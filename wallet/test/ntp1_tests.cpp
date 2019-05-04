@@ -1,6 +1,7 @@
 #include "googletest/googletest/include/gtest/gtest.h"
 
 #include "curltools.h"
+#include "init.h"
 #include "ntp1/ntp1script.h"
 #include "ntp1/ntp1script_burn.h"
 #include "ntp1/ntp1script_issuance.h"
@@ -14,6 +15,7 @@
 #include "ntp1/ntp1txout.h"
 #include "ntp1/ntp1v1_issuance_static_data.h"
 #include "ntp1/ntp1wallet.h"
+#include "wallet.h"
 #include <boost/algorithm/string.hpp>
 #include <fstream>
 #include <random>
@@ -2736,6 +2738,85 @@ TEST(ntp1_tests, ntp1v1_metadata_map)
     json_spirit::Value r;
     EXPECT_NO_THROW(r = GetNTP1v1IssuanceMetadataNode("La6h77fYdhWAAEgRqM1BJBwwnjc1XTSaPdhfxo"));
     EXPECT_ANY_THROW(GetNTP1v1IssuanceMetadataNode("La6h77fYdhWAAEgRqM1BJBwwnjc1XTSaPdhfxoxxxx"));
+}
+
+static void AddTxToWallet(CWallet& wallet, CTransaction tx)
+{
+    CWalletTx wtx(&wallet, tx);
+    wallet.AddToWallet(wtx);
+}
+
+void AddKeyToWallet(CWallet& wallet, const std::string& pkey, const std::string& expectedAddress)
+{
+    CBitcoinSecret vchSecret;
+    EXPECT_TRUE(vchSecret.SetString(pkey));
+    CKey    key;
+    bool    fCompressed;
+    CSecret secret = vchSecret.GetSecret(fCompressed);
+    key.SetSecret(secret, fCompressed);
+    CKeyID vchAddress = key.GetPubKey().GetID();
+    wallet.AddKey(key);
+    EXPECT_TRUE(wallet.HaveKey(vchAddress));
+    EXPECT_EQ(CBitcoinAddress(vchAddress).ToString(), expectedAddress);
+}
+
+TEST(ntp1_tests, create_transaction)
+{
+    std::vector<std::string> TransactionsToDownload = {
+        "47eea6147e95664ad4da60a4689cfaff2caa23095dbceb7ded5c2dbb9d2b521e",
+        "4290fbc546a60c3b5795db118f356d31efb2a50de387fb57c4615b5cfb27cd1e",
+        "a664faddfac124d7f8a6a9e8c42d787045a1c2ec5097ee2fa3031d0cd38707b6",
+        "607936597e25646c0bd9fa48a1db9e10805b6575ffec0c6b4c57b763972f9eec",
+        "52642b5f203325eac141b6c151955636e57a28906fbc4786f263b5888219f66d",
+        "7d14ccbaec4f3ef9169c5411ca075b67f721644fd203b3401719872250d79bc5",
+        "a6d25e5e7b3e1728c62bd902f1a50eed5ac92a46abc2dd7748db66fd6b9c480e",
+        "9b2cd8c8279c976a454d557839b8c61d2433b753501b71461d218945f905f4f6",
+        "1cdf77ad57147322724748dbf47a7d97cd0cb742c7248ad6697632f8fe8fcb15",
+        "d50672cb64f750db62cce8732572a84fa09b7b059df0e4f77cadef824f0da0c5",
+        "979c8fee6a12ecc438e859bec5f65a83e314dea1eda4298805fda3e2c3688c3d",
+        "edc9d99cc20e06ce14037293ad8985817712f8a4f4abd1da4b97f1f9aaa2bb5b",
+        "a74ba43d781e0bdac7c3e8d2dfcec749411452d3c42741d8e16c7e23905fa8f7",
+        "6bd1497721d4767b3368c5e7426d6abf83375f757a46f5daa9b03918bfe1caeb",
+        "ffe6513d3df142e92ef1f91fc545af50a6933d9fed119808bba21b852603674e",
+        "fea488bb081f501f35b1c4b89ae126a01124dbae5286a2971e2227df2309588e",
+        "041355d3d32363d78c6e2092d071909d3b3f180e6a0a3b7f45f00eed36382263"};
+
+    std::vector<CTransaction> TransactionsToPutInWallet;
+
+    fTestNet = true;
+
+    EXPECT_GT(TransactionsToDownload.size(), 0u);
+
+    std::string tmpWalletFileName = "tempwallet.dat";
+
+    boost::filesystem::remove(tmpWalletFileName);
+    std::shared_ptr<CWallet> wallet            = std::make_shared<CWallet>(tmpWalletFileName);
+    bool                     FirstLoadOfWallet = true;
+    wallet->LoadWallet(FirstLoadOfWallet);
+
+    MainWalletPtr = wallet;
+    appInitiated.store(true);
+
+    for (const std::string& txid : TransactionsToDownload) {
+        std::string  rawTx = GetRawTxOnline(txid, fTestNet);
+        CTransaction tx    = TxFromHex(rawTx);
+        std::string  ntp1script;
+        EXPECT_TRUE(IsTxNTP1(&tx, &ntp1script));
+        TransactionsToPutInWallet.push_back(tx);
+    }
+
+    AddTxToWallet(*wallet, TransactionsToPutInWallet.at(0));
+
+    AddKeyToWallet(*wallet, "VcsVFY5ucTqrf24JE1J8ms5fy1nSpd4q8QqjMeVAcF5u9rukJmUd",
+                   "TJBWQQXi6XS6cfBPXtV2ot8LyLGPT9yLYL");
+
+    boost::shared_ptr<NTP1Wallet> ntp1wallet = boost::make_shared<NTP1Wallet>();
+    EXPECT_EQ(ntp1wallet->getNumberOfTokens(), 0u);
+    ntp1wallet->update();
+    //    EXPECT_EQ(ntp1wallet->getNumberOfTokens(), 1u);
+
+    boost::filesystem::remove(tmpWalletFileName);
+    EXPECT_FALSE(boost::filesystem::exists(tmpWalletFileName));
 }
 
 // TEST(ntp1_tests, total_fee_calculator)
